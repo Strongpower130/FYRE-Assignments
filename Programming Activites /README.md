@@ -1,6 +1,6 @@
 # Programming Assignments
 
-#Sept 9th Logs'n updates
+## Sept 9th Logs'n updates
 
 14:37 Uploaded a new .py file. Intro to python script printing name and a test function cuz I was curious.
 
