@@ -11,3 +11,5 @@
 15:02 Uploaded new .py file named program 3 to reflect the changes to the printing function now referencing to a variable containing a string.
 
 15:04 fixed and clarified what is program 1 and 2.
+
+15:50 added program 4. a python script for simple blinking led on arduino board (esp32)
