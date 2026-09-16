@@ -21,3 +21,5 @@
 ### Sept 16th Logs'n updates
 
 14:27 Uploaded a new .py file reflecting todays part 1 activity named "Motors and Signals." The program works as intended and is generated with ChatGPT. The top has the required formatting along with our ai prompts which generated the resulting program underneath
+
+16:03 Uploaded a new .py file named "Sensing the World Part 2 Sensor Preformance Data Collection.py". This progrma works as intended and is generated with ChatGPT. The top has the required formatting along with our ai prompts which generated the resulting program underneath. There is also a new directory for Programming Activites where I uploaded the excel spreadsheet but it doesn't want to be placed in this directory for some reason.
