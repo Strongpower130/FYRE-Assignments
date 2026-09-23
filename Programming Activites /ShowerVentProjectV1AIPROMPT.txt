@@ -1,0 +1,44 @@
+Model: Arduino Nano ESP32
+Programming language: micro Python
+
+Script: all contained in 1 python .py file
+
+Please refer to the online documentation on the modules and/or libraries that the Arduino Nano ESP32 interfaces with. ASSUME THIS SYSTEM RUNS FULLY OFFLINE.
+
+Please keep input and output pins as global constant variables placed at the top of the program. I may change the pins at a later time and want a place to change them. For these global constant variables, please use the SCREAMING_SNAKE_CASE naming convention. The variable names should describe exactly what it stores so if a variable stores the pin number for a specific input like a button that does a specific objectives like a power button it should be called POWER_BUTTON_DIGITAL_PIN_INPUT = [acutal pin number]
+
+Inputs
+    • 2 Momentary Contact Switches (hooked to digital input pins)
+    • 1 humidity sensor (hooked to a analog input pin)
+
+Outputs
+    • 1 DC motor (hooked to a digital output pin)
+    • 1 Servo Motor (I’m unsure if this should be hooked to an analog or digital pin)
+    • 1 LED (hooked to a digital output pin) Will be referring to this as external LED.
+    • the arduino nano’s own onboard led
+
+Some additional variables that may be wanted. These should be treated as global constant variables
+    • Servo motor rotation amount (so I can change how much the servo motor should be rotating. Ideally, this number will accept DEGREES so if I set the value to 180 it should rotate 180 degrees)
+    • Humidity measurement output threshold. (ALSO COMMENT CLEARLY WHERE THIS VARIABLE IS USED AS I MAY NEED TO ADJUST THE COMPARASON STATEMENT)
+    • Debounce time (in seconds) before the vent (vent defined later) turns off 
+
+You may define other variables that may be used in aiding functionality of the program. Variables that keep track of the state of things, ect. They should be defined below our constant varaibles. They should also be named approprately and documented accordingly.
+
+The task at hand:
+You are to write a program in micropython. 
+
+There may be terms specific to this program that I will be constantly referring to. I will define them now.
+
+Vent or venting. This refers to the DC motor, Servo Motor, and the external LED. The vent is either ON or VENTING or OFF or NOT VENTING. When it is ON, the DC motor is on and constantly spinning, the servo motor is rotated to it’s ON position, and the external LED is ON and on a SOLID color. When the vent is OFF, the DC motor is OFF and NOT spinning, the servo motor is rotated to its OFF position (opposite of its rotation amount), and the external LED is OFF. 
+
+These are the tasks it should accomplish
+
+    1. There is a humidity sensor. This sensor should output a analog output reading to the arudino. Simply put, when the reading of this sensor exceeds our stated humidity measurement output threshold, it should turn ON the vent. When the reading of this sensor goes from EXCEEDING our stated humidity measurement output to BELOW, there should be a debounce timer which should keep the VENT ON for a predetermined amount of time before the vent turns OFF. Do note that when the debounce timer is ACTIVE, the external LED should be BLINKING every 0.5 seconds. 
+    2. There are 2 momentary contact switches. They output true when they are depressed and output false when not depressed. I will be calling these momentary contact switches, buttons.
+        1. One of the buttons will be to toggle on or off the system. You may use a global variable to keep track of if the system is on or off. It should really be as simple as reading when this button outputs true it sets that global variable boolean value to its opposite value. When the system is off, it will only be checking for this global variable boolean value before it proceeds with the rest of the code. When the system is on, the onboard LED should be turned ON and when the system is off, the onboard LED should be turned OFF. When the system is turned off, the variables responsible for holding 
+        2. The other button will be to manually toggle the vent on and off. When this button toggles the vent on it should turn the vent system to ON regardless of the humidity sensor output. When the button toggles the vent off, it should IGNORE the debounce timer and instantly shut off the vent.
+    3. When the system is off, it should not reset its global constant variables, but it should reset the other variables that may be declared and used to their default values. The default vent mode should be OFF not on. Stuff like that.
+    4. There should be a PRINT statement that prints EVERY SECOND to the console logging what is stored in the mutuable varaibles. Stuff like if the system is on, what rotation the current servo motor is at, if the dc motor is ON, the current reading of the humidity sensor, the led status if its “ON, DEBOUNCE, OFF” ect. This print statement should ALWAYS be running regardless of if the system is ON or OFF.
+    5. Keep in mind all the above mentioned tasks should be contained in one .py file. This because we are using https://lab-micropython.arduino.cc/ to load our code onto the arduino.
+    6. Feel free to use helper functions only in cases where it would either reduce nesting or help with code readability
+    7. MAKE SURE YOU COMMENT WHAT EACH BLOCK OF CODE DOES.
