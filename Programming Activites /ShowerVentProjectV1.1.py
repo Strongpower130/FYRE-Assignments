@@ -6,9 +6,12 @@
 # Date of Last Update: 9/23/2026
 # Explination of AI: AI was used to generate the code below. A very explicit prompt was given to the AI which generated the code below. This is version 1.
 # Version 1 of program works 100% as intended no bugs. 
+# Below is revision 1. Modified it to use stepper motor instead of DC motor.
+# We lack the electrical components to power the DC motor as the board doesn't supply enough amps.
+# AND the board isnt a 5V system.
 
 
-from machine import Pin, ADC, PWM
+from machine import Pin, ADC, PWM, Timer
 import time
 
 # =============================================================================
@@ -20,11 +23,16 @@ import time
 
 POWER_BUTTON_DIGITAL_PIN_INPUT = 5            # D2  - toggles the whole system on/off
 MANUAL_VENT_BUTTON_DIGITAL_PIN_INPUT = 6      # D3  - manually toggles the vent on/off
-HUMIDITY_SENSOR_ANALOG_PIN_INPUT = 1          # A0  - humidity sensor analog output
-VENT_DC_MOTOR_DIGITAL_PIN_OUTPUT = 7          # D4  - DC motor (drive through a transistor/MOSFET!)
-EXTERNAL_LED_DIGITAL_PIN_OUTPUT = 8           # D5  - external LED (use a series resistor)
-VENT_SERVO_MOTOR_DIGITAL_PWM_PIN_OUTPUT = 9   # D6  - servo signal wire (PWM on a digital pin)
+HUMIDITY_SENSOR_ANALOG_PIN_INPUT = 2          # A1  - humidity sensor analog output
+EXTERNAL_LED_DIGITAL_PIN_OUTPUT = 9           # D6  - external LED (use a series resistor)
+VENT_SERVO_MOTOR_DIGITAL_PWM_PIN_OUTPUT = 8   # D5  - servo signal wire (moved off GPIO21, now stepper IN2)
 ONBOARD_LED_DIGITAL_PIN_OUTPUT = 48           # D13 - Nano ESP32 built-in LED
+
+# Stepper driver board (ULN2003) inputs.
+STEPPER_IN1_DIGITAL_PIN_OUTPUT = 18           # D9
+STEPPER_IN2_DIGITAL_PIN_OUTPUT = 21           # D10
+STEPPER_IN3_DIGITAL_PIN_OUTPUT = 38           # D11
+STEPPER_IN4_DIGITAL_PIN_OUTPUT = 47           # D12
 
 # =============================================================================
 # GLOBAL CONSTANTS - TUNABLE SETTINGS
@@ -33,12 +41,12 @@ ONBOARD_LED_DIGITAL_PIN_OUTPUT = 48           # D13 - Nano ESP32 built-in LED
 # How far the servo rotates (in DEGREES) when the vent turns ON.
 # OFF position is SERVO_OFF_POSITION_DEGREES, ON position is OFF + this amount.
 # A standard hobby servo can only travel ~180 degrees (max value here is 180).
-SERVO_ROTATION_AMOUNT_DEGREES = 90
+SERVO_ROTATION_AMOUNT_DEGREES = 75
 SERVO_OFF_POSITION_DEGREES = 0
 
 # Humidity threshold on the ADC scale 0 - 65535 (0 = 0 V, 65535 = ~3.3 V).
 # The comparison that uses this value is in run_automatic_vent_logic().
-HUMIDITY_MEASUREMENT_OUTPUT_THRESHOLD = 40000
+HUMIDITY_MEASUREMENT_OUTPUT_THRESHOLD = 500
 
 # How long (seconds) the vent stays ON after humidity drops back below the threshold.
 VENT_OFF_DEBOUNCE_TIME_SECONDS = 5
@@ -52,7 +60,7 @@ STATUS_PRINT_INTERVAL_MS = 1000
 # Button electrical settings.
 # 1 = pin reads HIGH when pressed (button wired to 3.3 V, internal pull-down used).
 # 0 = pin reads LOW when pressed (button wired to GND, internal pull-up used).
-BUTTON_PRESSED_LOGIC_LEVEL = 1
+BUTTON_PRESSED_LOGIC_LEVEL = 0
 BUTTON_SOFTWARE_DEBOUNCE_MS = 50   # ignores contact bounce of the physical switch
 
 # Servo pulse settings (standard hobby servo: 50 Hz, 0.5 ms - 2.5 ms pulse).
@@ -60,6 +68,27 @@ SERVO_PWM_FREQUENCY_HZ = 50
 SERVO_MIN_PULSE_WIDTH_US = 500
 SERVO_MAX_PULSE_WIDTH_US = 2500
 SERVO_MAX_ANGLE_DEGREES = 180
+
+# Stepper settings (28BYJ-48 in half-step mode: ~4096 steps per output-shaft revolution).
+# Time between steps in milliseconds. Speed (RPM) = 60000 / (4096 * interval).
+#   2 ms -> ~7.3 RPM (reliable default)   3 ms -> ~4.9 RPM (more torque)
+# Going below ~1-2 ms usually makes the 28BYJ-48 buzz and skip instead of turning.
+STEPPER_STEP_INTERVAL_MS = 1
+# Spin direction: 1 or -1.
+STEPPER_DIRECTION = 1
+# Hardware timer used to step the motor in the background (ESP32-S3 has 0 - 3).
+STEPPER_TIMER_ID = 0
+# Half-step coil pattern for IN1, IN2, IN3, IN4.
+STEPPER_HALF_STEP_SEQUENCE = (
+    (1, 0, 0, 0),
+    (1, 1, 0, 0),
+    (0, 1, 0, 0),
+    (0, 1, 1, 0),
+    (0, 0, 1, 0),
+    (0, 0, 1, 1),
+    (0, 0, 0, 1),
+    (1, 0, 0, 1),
+)
 
 # Delay at the end of each main-loop pass (milliseconds).
 MAIN_LOOP_DELAY_MS = 10
@@ -78,9 +107,20 @@ humidity_adc = ADC(Pin(HUMIDITY_SENSOR_ANALOG_PIN_INPUT))
 humidity_adc.atten(ADC.ATTN_11DB)
 
 # Digital outputs.
-dc_motor = Pin(VENT_DC_MOTOR_DIGITAL_PIN_OUTPUT, Pin.OUT)
 external_led = Pin(EXTERNAL_LED_DIGITAL_PIN_OUTPUT, Pin.OUT)
 onboard_led = Pin(ONBOARD_LED_DIGITAL_PIN_OUTPUT, Pin.OUT)
+
+# Stepper coil outputs, all starting LOW (coils de-energized).
+stepper_coil_pins = (
+    Pin(STEPPER_IN1_DIGITAL_PIN_OUTPUT, Pin.OUT, value=0),
+    Pin(STEPPER_IN2_DIGITAL_PIN_OUTPUT, Pin.OUT, value=0),
+    Pin(STEPPER_IN3_DIGITAL_PIN_OUTPUT, Pin.OUT, value=0),
+    Pin(STEPPER_IN4_DIGITAL_PIN_OUTPUT, Pin.OUT, value=0),
+)
+
+# Timer that steps the motor in the background, so the main loop's 10 ms delay
+# and the console prints don't limit or stutter the motor speed.
+stepper_timer = Timer(STEPPER_TIMER_ID)
 
 # Servo: PWM output at 50 Hz (duty is set later when an angle is commanded).
 servo_pwm = PWM(Pin(VENT_SERVO_MOTOR_DIGITAL_PWM_PIN_OUTPUT), freq=SERVO_PWM_FREQUENCY_HZ, duty_u16=0)
@@ -90,13 +130,13 @@ servo_pwm = PWM(Pin(VENT_SERVO_MOTOR_DIGITAL_PWM_PIN_OUTPUT), freq=SERVO_PWM_FRE
 # =============================================================================
 
 system_is_on = False                 # True when the power button has turned the system on
-vent_is_on = False                   # True when the vent is ON (motor + servo + LED)
+vent_is_on = False                   # True when the vent is ON (stepper + servo + LED)
 manual_override_active = False       # True when the manual button turned the vent on (ignores humidity)
 auto_vent_suppressed = False         # True after a manual OFF while humidity is still high;
                                      # blocks auto turn-on until humidity drops below threshold once
 debounce_timer_active = False        # True while the vent is waiting to turn off after humidity dropped
 debounce_timer_start_ms = 0          # time.ticks_ms() value when the debounce timer started
-dc_motor_is_on = False               # Mirrors the DC motor output
+stepper_is_on = False                # True while the stepper is spinning
 servo_current_angle_degrees = SERVO_OFF_POSITION_DEGREES  # Last angle commanded to the servo
 external_led_status = "OFF"          # "ON" (solid), "DEBOUNCE" (blinking) or "OFF"
 external_led_is_lit = False          # Physical state of the external LED right now
@@ -107,6 +147,9 @@ external_led_is_lit = False          # Physical state of the external LED right 
 
 latest_humidity_reading = 0          # Most recent raw ADC reading (0 - 65535); read every loop
 last_status_print_ms = 0             # When the status line was last printed
+stepper_sequence_index = 0           # Position in STEPPER_HALF_STEP_SEQUENCE (kept so restarts are smooth)
+stepper_step_count = 0               # Total steps taken; if this rises but the shaft doesn't turn,
+                                     # check motor power / wiring rather than code
 
 # Button trackers. These follow the physical button, so they are intentionally NOT
 # reset with the system (resetting could cause a phantom press if a button is held).
@@ -153,17 +196,60 @@ def set_servo_angle(angle_degrees):
     servo_current_angle_degrees = angle_degrees
 
 
+def _stepper_timer_callback(timer):
+    """Runs every STEPPER_STEP_INTERVAL_MS while the stepper is on: advances one half-step."""
+    global stepper_sequence_index, stepper_step_count
+
+    # A step may already be queued when the motor is stopped; ignore it.
+    if not stepper_is_on:
+        return
+
+    stepper_sequence_index = (stepper_sequence_index + STEPPER_DIRECTION) % len(STEPPER_HALF_STEP_SEQUENCE)
+    pattern = STEPPER_HALF_STEP_SEQUENCE[stepper_sequence_index]
+    for i in range(4):
+        stepper_coil_pins[i].value(pattern[i])
+    stepper_step_count += 1
+
+
+def release_stepper_coils():
+    """Turns all four coils off so the motor doesn't sit there drawing current and heating up."""
+    for coil_pin in stepper_coil_pins:
+        coil_pin.value(0)
+
+
+def start_stepper():
+    """Starts continuous spinning (does nothing if already spinning)."""
+    global stepper_is_on
+
+    if stepper_is_on:
+        return
+    stepper_is_on = True
+    stepper_timer.init(mode=Timer.PERIODIC, period=STEPPER_STEP_INTERVAL_MS,
+                       callback=_stepper_timer_callback)
+
+
+def stop_stepper():
+    """Stops the stepper and de-energizes its coils."""
+    global stepper_is_on
+
+    was_running = stepper_is_on
+    stepper_is_on = False          # set first so any already-queued step is ignored
+    if was_running:
+        stepper_timer.deinit()
+    release_stepper_coils()
+
+
 def set_vent_outputs(turn_on):
-    """Sets the DC motor and servo for ON or OFF (the external LED is handled by update_external_led)."""
-    global vent_is_on, dc_motor_is_on
+    """Sets the stepper and servo for ON or OFF (the external LED is handled by update_external_led)."""
+    global vent_is_on
 
     vent_is_on = turn_on
-    dc_motor_is_on = turn_on
-    dc_motor.value(1 if turn_on else 0)
 
     if turn_on:
+        start_stepper()
         set_servo_angle(SERVO_OFF_POSITION_DEGREES + SERVO_ROTATION_AMOUNT_DEGREES)
     else:
+        stop_stepper()
         set_servo_angle(SERVO_OFF_POSITION_DEGREES)
 
 
@@ -295,10 +381,11 @@ def print_status_if_due(now_ms):
         "ON" if onboard_led.value() else "OFF",
         "ON" if vent_is_on else "OFF",
         manual_override_active))
-    print("  Humidity reading: {} (threshold {}) | DC motor: {} | Servo angle: {} deg".format(
+    print("  Humidity reading: {} (threshold {}) | Stepper: {} (steps: {}) | Servo angle: {} deg".format(
         latest_humidity_reading,
         HUMIDITY_MEASUREMENT_OUTPUT_THRESHOLD,
-        "ON" if dc_motor_is_on else "OFF",
+        "ON" if stepper_is_on else "OFF",
+        stepper_step_count,
         servo_current_angle_degrees))
     print("  External LED: {} | Debounce active: {} ({:.1f}s left) | Auto suppressed: {}".format(
         external_led_status,
@@ -327,26 +414,34 @@ reset_state_variables(time.ticks_ms())
 # MAIN LOOP
 # =============================================================================
 
-while True:
-    now = time.ticks_ms()
+try:
+    while True:
+        now = time.ticks_ms()
 
-    # Read inputs every pass (the sensor is read even when the system is off, for the status print).
-    latest_humidity_reading = humidity_adc.read_u16()
-    power_pressed = button_was_just_pressed(power_button, power_button_tracker, now)
-    manual_pressed = button_was_just_pressed(manual_vent_button, manual_button_tracker, now)
+        # Read inputs every pass (the sensor is read even when the system is off, for the status print).
+        latest_humidity_reading = humidity_adc.read_u16()
+        power_pressed = button_was_just_pressed(power_button, power_button_tracker, now)
+        manual_pressed = button_was_just_pressed(manual_vent_button, manual_button_tracker, now)
 
-    # Power button always works.
-    if power_pressed:
-        toggle_system(now)
+        # Power button always works.
+        if power_pressed:
+            toggle_system(now)
 
-    # Everything else only runs while the system is on.
-    if system_is_on:
-        if manual_pressed:
-            handle_manual_vent_button(now)
-        run_automatic_vent_logic(now)
-        update_external_led(now)
+        # Everything else only runs while the system is on.
+        if system_is_on:
+            if manual_pressed:
+                handle_manual_vent_button(now)
+            run_automatic_vent_logic(now)
+            update_external_led(now)
 
-    # Status print always runs.
-    print_status_if_due(now)
+        # Status print always runs.
+        print_status_if_due(now)
 
-    time.sleep_ms(MAIN_LOOP_DELAY_MS)
+        time.sleep_ms(MAIN_LOOP_DELAY_MS)
+
+finally:
+    # If the program is stopped (e.g. Ctrl+C / Stop in Thonny), the background timer
+    # would otherwise keep the motor spinning. Shut everything down cleanly.
+    stop_stepper()
+    external_led.value(0)
+    onboard_led.value(0)
