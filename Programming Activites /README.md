@@ -27,3 +27,7 @@
 ### Sept 23rd Logs'n updates
 
 15:43 UPloaded ShowerVentProjectV1.py. Name self explanatory. A very explicit prompt was given to the ai and will be uploaded and named accordingly. AI model used: CLAUDE SONNET 5 HIGH
+
+### Sept 30th Logs'n updates
+
+20:51 Uploaded ShowerVentProjectV1.1.py. Revision bump 1 as arduino is a 3.3v system and doesn't have enough amps to power a dc motor. The custom made humidity sensors are a doosey too but the program works as intended.
